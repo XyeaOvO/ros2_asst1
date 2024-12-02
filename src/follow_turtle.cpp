@@ -63,6 +63,8 @@ private:
         {
             message.linear.x = 0.0;
             message.angular.z = 0.0;
+            integral_angular = 0.0;
+            integral_linear -= 5.0;
             publisher_->publish(message);
             if (!reach_flag) {
                 RCLCPP_INFO(this->get_logger(), "%s reached target %s", 
@@ -101,8 +103,11 @@ public:
             catcher + "/cmd_vel", 10);
 
         // 初始化PID控制参数
-        Kp_linear = 5.0; Ki_linear = 0.1; Kd_linear = 0.2;
-        Kp_angular = 15.0; Ki_angular = 0.1; Kd_angular = 0.0;
+        // Kp_linear = 5.0; Ki_linear = 0.1; Kd_linear = 0.2;
+        // Kp_angular = 10.0; Ki_angular = 0; Kd_angular = 0.0;
+
+        Kp_linear = 2.0; Ki_linear = 0.05; Kd_linear = 0.1;
+        Kp_angular = 10.0; Ki_angular = 0.05; Kd_angular = 0.1;    
 
         prev_error_linear = 0.0;
         prev_error_angular = 0.0;
