@@ -77,8 +77,8 @@ private:
         }
 
         // 设定限额并限制速度
-        control_linear = std::clamp(control_linear, -100.0, 100.0);
-        control_angular = std::clamp(control_angular, -100.0, 100.0);
+        control_linear = std::clamp(control_linear, -30.0, 30.0);
+        control_angular = std::clamp(control_angular, -30.0, 30.0);
 
         // 发布控制命令
         message.linear.x = control_linear;
@@ -101,8 +101,8 @@ public:
             catcher + "/cmd_vel", 10);
 
         // 初始化PID控制参数
-        Kp_linear = 3.0; Ki_linear = 0.005; Kd_linear = 0.2;
-        Kp_angular = 15.0; Ki_angular = 0.0; Kd_angular = 0.0;
+        Kp_linear = 5.0; Ki_linear = 0.1; Kd_linear = 0.2;
+        Kp_angular = 15.0; Ki_angular = 0.1; Kd_angular = 0.0;
 
         prev_error_linear = 0.0;
         prev_error_angular = 0.0;
@@ -138,9 +138,9 @@ public:
 
 int main(int argc, char *argv[])
 {
-    if (argc != 4) {
+    if (argc < 3) {
         RCLCPP_ERROR(rclcpp::get_logger("rclcpp"), 
-                    "Usage: follow target follower1 follower2");
+                    "Usage: follow target follower1 [follower2 follower3 ...]");
         return 1;
     }
 
@@ -148,9 +148,15 @@ int main(int argc, char *argv[])
     
     MultiFollowerManager manager;
     
-    // 添加两个跟随者，都跟随同一个目标
-    manager.addFollower(argv[1], argv[2]);  // follower1 follows target
-    manager.addFollower(argv[1], argv[3]);  // follower2 follows target
+    // 获取目标名称
+    const std::string target = argv[1];
+    
+    // 添加所有跟随者
+    for (int i = 2; i < argc; i++) {
+        manager.addFollower(target, argv[i]);
+        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), 
+                    "Added follower %s to follow %s", argv[i], target.c_str());
+    }
     
     manager.spin();
     
