@@ -1,6 +1,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
+#include "std_msgs/msg/float64.hpp"  // 添加用于发布误差值
 #include "tf2_ros/transform_listener.h"
 #include "tf2_ros/buffer.h"
 #include "tf2/exceptions.h"
@@ -13,6 +14,9 @@ class FormationFollowerNode: public rclcpp::Node
 {
 private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;
+    // 添加误差发布器
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr error_linear_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr error_angular_publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -46,6 +50,17 @@ private:
         }
     }
 
+    void publish_error(double error_linear, double error_angular) {
+        auto linear_msg = std_msgs::msg::Float64();
+        auto angular_msg = std_msgs::msg::Float64();
+        
+        linear_msg.data = error_linear;
+        angular_msg.data = error_angular;
+        
+        error_linear_publisher_->publish(linear_msg);
+        error_angular_publisher_->publish(angular_msg);
+    }
+
     void timer_callback()
     {
         if (!initial_transform_recorded_)
@@ -66,23 +81,19 @@ private:
             return;
         }
 
-        // 转换当前变换为tf2格式
         tf2::Transform current_transform;
         tf2::fromMsg(current_tf.transform, current_transform);
         
-        // 计算期望变换：当前位置与初始相对位置的差异
         tf2::Transform error_transform = current_transform * initial_relative_transform_.inverse();
-        // RCLCPP_INFO(this->get_logger(), "catcher: %s, target: %s, error: %f, %f, current: %f, %f, initial: %f, %f, initial_inverse: %f, %f",
-        //             catcher.c_str(), target.c_str(), error_transform.getOrigin().x(),
-        //             error_transform.getOrigin().y(), current_transform.getOrigin().x(), current_transform.getOrigin().y(), initial_relative_transform_.getOrigin().x(), initial_relative_transform_.getOrigin().y(), initial_relative_transform_.inverse().getOrigin().x(), initial_relative_transform_.inverse().getOrigin().y()); 
    
-        // 提取偏差
         double error_linear = std::hypot(error_transform.getOrigin().x(),
                                        error_transform.getOrigin().y());
         double error_angular = std::atan2(error_transform.getOrigin().y(),
                                         error_transform.getOrigin().x());
 
-        // PID控制计算
+        // 发布误差值用于可视化
+        publish_error(error_linear, error_angular);
+
         double control_linear = Kp_linear * error_linear +
                               Ki_linear * integral_linear +
                               Kd_linear * (error_linear - prev_error_linear);
@@ -90,13 +101,11 @@ private:
                                Ki_angular * integral_angular +
                                Kd_angular * (error_angular - prev_error_angular);
 
-        // 更新积分项和前一个误差
         integral_linear += error_linear;
         integral_angular += error_angular;
         prev_error_linear = error_linear;
         prev_error_angular = error_angular;
 
-        // 如果误差小于阈值，停止
         if (error_linear < 0.1)
         {
             auto message = geometry_msgs::msg::Twist();
@@ -104,8 +113,6 @@ private:
             message.angular.z = 0.0;
             integral_angular = 0.0;
             integral_linear -= 5.0;
-            // prev_error_linear  = 0.0;
-            // prev_error_angular = 0.0;
             publisher_->publish(message);
             if (!reach_flag) {
                 RCLCPP_INFO(this->get_logger(), "%s reached formation position relative to %s",
@@ -119,11 +126,9 @@ private:
             reach_flag = false;
         }
 
-        // 设定限额并限制速度
         control_linear = std::clamp(control_linear, -30.0, 30.0);
         control_angular = std::clamp(control_angular, -30.0, 30.0);
 
-        // 发布控制命令
         auto message = geometry_msgs::msg::Twist();
         message.linear.x = control_linear;
         message.angular.z = control_angular;
@@ -143,10 +148,12 @@ public:
 
         publisher_ = this->create_publisher<geometry_msgs::msg::Twist>(
             catcher + "/cmd_vel", 10);
-
-        // 初始化PID控制参数
-        // Kp_linear = 10.0; Ki_linear = 0.1; Kd_linear = 1;
-        // Kp_angular = 10.0; Ki_angular = 0; Kd_angular = 0.0;
+            
+        // 创建误差发布器
+        error_linear_publisher_ = this->create_publisher<std_msgs::msg::Float64>(
+            catcher + "/error_linear", 10);
+        error_angular_publisher_ = this->create_publisher<std_msgs::msg::Float64>(
+            catcher + "/error_angular", 10);
 
         Kp_linear = 5.0; Ki_linear = 0.002; Kd_linear = 0.5;
         Kp_angular = 5.0; Ki_angular = 0.00; Kd_angular = 0.0;    
@@ -195,10 +202,8 @@ int main(int argc, char *argv[])
 
     MultiFormationFollowerManager manager;
 
-    // 获取目标名称
     const std::string target = argv[1];
 
-    // 添加所有跟随者
     for (int i = 2; i < argc; i++) {
         manager.addFollower(target, argv[i]);
         RCLCPP_INFO(rclcpp::get_logger("rclcpp"),
